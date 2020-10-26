@@ -1,0 +1,5 @@
+Necessary modules for implementation:
+- numpy
+- matplotlib.pyplot
+- scipy.io
+- scipy
