@@ -66,13 +66,14 @@ if __name__ == '__main__':
         for i in range(1, n+1):
             eval(f"plt.subplot(2{n}{i})")
             eval(f"plt.imshow(Ao[{i - 1},:].reshape((nsamples,nsamples)).T,extent = [0,100,100,0],aspect='auto')")
-            plt.title(f"Perfil #{i}", fontweight="bold")
+            plt.title(f"Endmember #{i}", fontweight="bold", fontsize=10)
             eval(f"plt.subplot(2{n}{i+n})")
             eval(f"plt.imshow(An[{i-1},:].reshape((nsamples,nsamples)).T,extent = [0,100,100,0], aspect='auto')")
             if i == 2:
-                plt.title("Estimación EBEAE en Python", fontweight="bold")
+                plt.title("EBEAE Estimation", fontweight="bold", fontsize=10)
         plt.xticks(np.arange(0, 101, 20))
         plt.subplots_adjust(hspace=0.5, wspace=0.5)
+        # plt.colorbar()
         plt.savefig('Abundance_maps_VNIR.png')
 
         # Plot Ground-Truths and Estimated Endmembers
@@ -83,20 +84,20 @@ if __name__ == '__main__':
         plt.subplots_adjust(hspace=0.5)
         plt.axis([450, 950, 0, np.max(np.max(Po))])
         plt.xticks(np.arange(450, 951, 50))
-        plt.xlabel("Longitud de onda (nm)")
-        plt.ylabel("Intensidad Normalizada")
-        plt.title("Perfiles de Referencia Reales", fontweight="bold")
-        plt.legend(["Perfil #1", "Perfil #2", "Perfil #3"])
+        plt.xlabel("Wavelength (nm)")
+        plt.ylabel("Normalized Intensity")
+        plt.title("Ground-truth Endmembers", fontweight="bold", fontsize=10)
+        plt.legend(["Endmember #1", "Endmember #2", "Endmember #3"])
 
         plt.subplot(212)
         plt.plot(bands, P)
         plt.grid(True)
         plt.axis([450, 950, 0, np.max(np.max(Po))])
         plt.xticks(np.arange(450, 951, 50))
-        plt.xlabel("Longitud de onda (nm)")
-        plt.ylabel("Intensidad Normalizada")
-        plt.title("Estimación EBEAE en Python", fontweight="bold")
-        plt.legend(["Perfil #1", "Perfil #2", "Perfil #3"])
+        plt.xlabel("Wavelength (nm)")
+        plt.ylabel("Normalized Intensity")
+        plt.title("EBEAE Estimation", fontweight="bold", fontsize=10)
+        plt.legend(["Endmember #1", "Endmember #2", "Endmember #3"])
         plt.savefig('Endmembers_graphic_VNIR.png')
 
     except Exception as err:
