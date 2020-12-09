@@ -56,7 +56,7 @@ def vnirsynth(*args):
     y = np.arange(1, pix + 1)
     xx, yy = np.meshgrid(x, y)
     K = pix * pix
-    EndMembersVNIR = scipy.io.loadmat("./files/EndMembersVNIR")
+    EndMembersVNIR = scipy.io.loadmat("../files/EndMembersVNIR")
     P = EndMembersVNIR["P"]
     del EndMembersVNIR
     L = P.shape[0]

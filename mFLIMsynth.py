@@ -61,7 +61,7 @@ def mflimsynth(*args):
     y = np.arange(1, pix + 1)
     xx, yy = np.meshgrid(x, y)
     k = pix * pix
-    dataexp1 = scipy.io.loadmat("./files/dataexp1")
+    dataexp1 = scipy.io.loadmat("../files/dataexp1")
     u = dataexp1["u"]
     y = dataexp1["y"]
     del dataexp1

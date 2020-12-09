@@ -30,6 +30,7 @@ def abundance(Y, P, Lambda, parallel):
     September/2020
     """
     # Check arguments dimensions
+    numerr = 0
     M, N = Y.shape
     n = P.shape[1]
     A = np.zeros((n, N))
@@ -102,7 +103,7 @@ def abundance(Y, P, Lambda, parallel):
                 ak = delta[:n]
                 ak = np.where(abs(ak) < 1e-9, 0, ak)
         A[:, k] = np.c_[ak].T
-    return A
+    return A, numerr
 
 
 @performance
@@ -122,7 +123,7 @@ def endmember(Y, A, rho, normalization):
     """
     n, N = A.shape
     M, K = Y.shape
-    # P = np.zeros((M, n))
+    numerr = 0
     R = sum(n-np.array(range(1, n)))
     W = np.tile((1/K/sum(Y**2)), [n, 1]).T
     if Y.shape[1] != N:
@@ -160,7 +161,7 @@ def endmember(Y, A, rho, normalization):
         P = P_est/np.tile(P_sum, [M, 1])
     else:
         P = P_est
-    return P
+    return P, numerr
 
 
 @performance
@@ -412,11 +413,13 @@ def ebeae(Yo, n, parameters, Po, oae):
             print("Po is constructed based on the ICA selection (FOBI) + Rectified Linear Unit")
 
     while (Jp-J)/Jp >= epsilon and ITER < maxiter and oae == 0 and numerr == 0:
-        t_A, Am = abundance(Ym, P, Lambda, parallel)
+        t_A, outputs_a = abundance(Ym, P, Lambda, parallel)
+        Am, numerr = outputs_a
         a_Time += t_A
         Pp = P
         if numerr == 0:
-            t_P, P = endmember(Ym, Am, rho, normalization)
+            t_P, outputs_e = endmember(Ym, Am, rho, normalization)
+            P, numerr = outputs_e
             p_Time += t_P
         Jp = J
         J = np.linalg.norm(Ym-P@Am, 'fro')
@@ -431,7 +434,8 @@ def ebeae(Yo, n, parameters, Po, oae):
         ITER += 1
 
     if numerr == 0:
-        t_A, Am = abundance(Ymo, P, Lambda, parallel)
+        t_A, outputs_a = abundance(Ymo, P, Lambda, parallel)
+        Am, numerr = outputs_a
         a_Time += t_A
         toc = time.time()
         elap_time = toc-tic
