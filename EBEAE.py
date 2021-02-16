@@ -1,115 +1,202 @@
 # Extended Blind Endmembers and Abundances Extraction (EBEAE) Algorithm
-import time
+import logging as log
 import numpy as np
+import time
 from scipy import linalg
 
 
-def performance(fn):
+def performance(function):
     def wrapper(*args, **kwargs):
-        t1 = time.time()
-        result = fn(*args, **kwargs)
-        t2 = time.time()
-        # print(f'Function {fn.__name__} took {t2-t1} s')
-        return t2 - t1, result
+        start = time.time()
+        result = function(*args, **kwargs)
+        stop = time.time()
+        # log.info(f'Function {function.__name__} took {stop - start} secs.')
+        return stop - start, result
     return wrapper
 
 
+def args_consistency(kwargs: dict) -> dict:
+    given_args = list(kwargs.keys())
+    default_args = {
+        'y_matrix': np.array([]),
+        'n_order': 2,
+        'parameters': {
+            'initcond': 1,
+            'rho': 0.1,
+            'lambda_var': 0,
+            'epsilon': 1e-3,
+            'maxiter': 20,
+            'downsampling': 0.5,
+            'parallel': 0,
+            'normalization': 1,
+            'display': 0},
+        'oae': 0
+    }
+    if len(given_args) in [4, 5]:
+        default_args['Po'] = np.array([])
+    for arg in given_args:
+        if arg in default_args.keys():
+            default_args[arg] = kwargs[arg]
+    return default_args
+
+
+def hyper_parameters_inspection(parameters: dict) -> dict:
+    if parameters['initcond'] not in [1, 2, 3, 4]:
+        print("The initialization procedure of endmembers matrix is 1,2,3 or 4!")
+        print("The default value is considered!")
+        parameters['initcond'] = 1
+    if parameters['rho'] < 0:
+        print("The regularization weight rho cannot be negative")
+        print("The default value is considered!")
+        parameters['rho'] = 0.1
+    if parameters['lambda_var'] < 0 or parameters['lambda_var'] >= 1:
+        print("The entropy weight lambda is limited to [0,1)")
+        print("The default value is considered!")
+        parameters['lambda_var'] = 0
+    if parameters['epsilon'] < 0 or parameters['epsilon'] > 0.5:
+        print("The threshold epsilon can't be negative or > 0.5")
+        print("The default value is considered!")
+        parameters['epsilon'] = 1e-3
+    if parameters['maxiter'] < 0 or parameters['maxiter'] > 100:
+        print("The upper bound maxiter can't be negative or > 100")
+        print("The default value is considered!")
+        parameters['maxiter'] = 20
+    if parameters['downsampling'] < 0 or parameters['downsampling'] > 1:
+        print("The downsampling factor cannot be negative or > 1")
+        print("The default value is considered!")
+        parameters['downsampling'] = 0.5
+    if parameters['parallel'] not in [0, 1]:
+        print("The parallelization parameter is 0 or 1")
+        print("The default value is considered!")
+        parameters['parallel'] = 0
+    if parameters['normalization'] not in [0, 1]:
+        print("The normalization parameter is 0 or 1")
+        print("The default value is considered!")
+        parameters['normalization'] = 1
+    if parameters['display'] not in [0, 1]:
+        print("The display parameter is 0 or 1")
+        print("The default value is considered")
+        parameters['display'] = 0
+    return parameters
+
+
+def display_details(n_order: int, oae: int, initcond: int) -> None:
+    log.info("EBEAE Linear Unmixing")
+    log.info(f"Model Order = {n_order}")
+    if oae == 1:
+        log.info("Only the abundances are estimated from <p_origin>\n")
+    elif oae == 0 and initcond == 0:
+        log.info("The endmembers matrix is initialized externally by matrix <p_origin>\n")
+    elif oae == 0 and initcond == 1:
+        log.info("<p_origin> is constructed based on the maximum cosine difference from mean measurement\n")
+    elif oae == 0 and initcond == 2:
+        log.info(
+            "<p_origin> is constructed based on the maximum and minimum energy, and largest difference from them\n")
+    elif oae == 0 and initcond == 3:
+        log.info("<p_origin> is constructed based on the PCA selection + Rectified Linear Unit\n")
+    elif oae == 0 and initcond == 4:
+        log.info("<p_origin> is constructed based on the ICA selection (FOBI) + Rectified Linear Unit\n")
+
+
 @performance
-def abundance(Y, P, Lambda, parallel):
+def abundance(y_matrix: np.ndarray, p_matrix: np.ndarray, lambda_var: float, parallel: int) -> np.ndarray:
     """
-    A = abundance(Y,P,lambda,parallel):
     Estimation of Optimal Abundances in Linear Mixture Model
-    Input Arguments:
-    Y = matrix of measurements
-    P = matrix of end-members
-    Lambda =  entropy weight in abundance estimation in (0,1)
+    INPUTS:
+    y_matrix = matrix of measurements
+    p_matrix = matrix of end-members
+    lambda_var =  entropy weight in abundance estimation in (0,1)
     parallel = implementation in parallel of the estimation
-    Output Argument:
-    A = abundances matrix
-    Daniel U. Campos-Delgado
-    September/2020
+    OUTPUTS:
+    abundance_matrix = abundances matrix
+    - Daniel U. Campos-Delgado (September/2020)
     """
-    # Check arguments dimensions
-    numerr = 0
-    M, N = Y.shape
-    n = P.shape[1]
-    A = np.zeros((n, N))
-    if P.shape[0] != M:
-        print("ERROR: the number of rows in Y and P does not match")
-        numerr = 1
-
-    # Compute fixed vectors and matrices
-    c = np.ones((n, 1))
-    d = 1  # Lagrange Multiplier for equality restriction
-    Go = P.T @ P
-    w, v = np.linalg.eig(Go)
-    l_min = np.amin(w)
-    G = Go-np.eye(n)*l_min*Lambda
-    while (1/np.linalg.cond(G, 1)) < 1e-6:
-        Lambda = Lambda/2
-        G = Go-np.eye(n)*l_min*Lambda
-        if Lambda < 1e-6:
-            print("Unstable numerical results in abundances estimation, update rho!!")
-            numerr = 1
-    Gi = np.linalg.pinv(G)
-    T1 = Gi@c
-    T2 = c.T@T1
-
-    # Start Computation of Abundances
-    for k in range(N):
-        yk = np.c_[Y[:, k]]
-        byk = float(yk.T@yk)
-        bk = P.T@yk
-
-        # Compute Optimal Unconstrained Solution
-        dk = np.divide((bk.T@T1)-1, T2)
-        ak = Gi@(bk-c@dk)
-
-        # Check for Negative Elements
-        if float(sum(ak >= 0)) != n:
-            I_set = np.zeros((1, n))
-            while float(sum(ak < 0)) != 0:
-                I_set = np.where(ak < 0, 1, I_set.T).reshape(1, n)
-                L = len(np.where(I_set == 1)[1])
-                Q = n+1+L
-                Gamma = np.zeros((Q, Q))
-                Beta = np.zeros((Q, 1))
-                Gamma[:n, :n] = G/byk
-                Gamma[:n, n] = c.T
-                Gamma[n, :n] = c.T
-                cont = 0
-                if n >= 2:
-                    if bool(I_set[:, 0] != 0):
-                        cont += 1
-                        Gamma[0, n+cont] = 1
-                        Gamma[n+cont, 0] = 1
-                    if bool(I_set[:, 1] != 0):
-                        cont += 1
-                        Gamma[1, n+cont] = 1
-                        Gamma[n+cont, 1] = 1
-                    if n >= 3:
-                        if bool(I_set[:, 2] != 0):
+    try:
+        # Check arguments dimensions
+        num_error = 0
+        m_rows, n_cols = y_matrix.shape
+        p_n_cols = p_matrix.shape[1]
+        abundance_matrix = np.zeros((p_n_cols, n_cols))
+        if p_matrix.shape[0] != m_rows:
+            log.error("The number of rows in <y_matrix> and <p_matrix> does not match")
+            num_error = 1
+    except Exception as error:
+        log.error(f"ERROR [Abundance function | arguments dimensions]: {error}")
+    try:
+        # Compute fixed vectors and matrices
+        c_vector = np.ones((p_n_cols, 1))
+        d_lagrange = 1  # Lagrange Multiplier for equality restriction
+        g_o = p_matrix.T @ p_matrix
+        w, v = np.linalg.eig(g_o)
+        l_min = np.amin(w)
+        g = g_o - np.eye(p_n_cols) * l_min * lambda_var
+        while (1 / np.linalg.cond(g, 1)) < 1e-6:
+            lambda_var = lambda_var / 2
+            g = g_o - np.eye(p_n_cols) * l_min * lambda_var
+            if lambda_var < 1e-6:
+                log.error("Unstable numerical results in abundances estimation, update rho!!")
+                num_error = 1
+        g_i = np.linalg.pinv(g)
+        term_1 = g_i @ c_vector
+        term_2 = c_vector.T @ term_1
+    except Exception as error:
+        log.error(f"ERROR [Abundance function | computed fixed vectors and matrices]: {error}")
+    try:
+        # Start Computation of Abundances
+        for k_pos in range(n_cols):
+            y_k = np.c_[y_matrix[:, k_pos]]
+            b_y_k = float(y_k.T @ y_k)
+            b_k = p_matrix.T @ y_k
+            # Compute Optimal Unconstrained Solution
+            d_k = np.divide((b_k.T @ term_1) - 1, term_2)
+            a_k = g_i @ (b_k - c_vector @ d_k)
+            # Check for Negative Elements
+            if float(sum(a_k >= 0)) != p_n_cols:
+                index_set = np.zeros((1, p_n_cols))
+                while float(sum(a_k < 0)) != 0:
+                    index_set = np.where(a_k < 0, 1, index_set.T).reshape(1, p_n_cols)
+                    index_length = len(np.where(index_set == 1)[1])
+                    q_pos = p_n_cols + 1 + index_length
+                    gamma_matrix = np.zeros((q_pos, q_pos))
+                    beta_vector = np.zeros((q_pos, 1))
+                    gamma_matrix[:p_n_cols, :p_n_cols] = g / b_y_k
+                    gamma_matrix[:p_n_cols, p_n_cols] = c_vector.T
+                    gamma_matrix[p_n_cols, :p_n_cols] = c_vector.T
+                    cont = 0
+                    if p_n_cols >= 2:
+                        if bool(index_set[:, 0] != 0):
                             cont += 1
-                            Gamma[2, n+cont] = 1
-                            Gamma[n+cont, 2] = 1
-                        if n == 4:
-                            if bool(I_set[:, 3] != 0):
+                            gamma_matrix[0, p_n_cols + cont] = 1
+                            gamma_matrix[p_n_cols + cont, 0] = 1
+                        if bool(index_set[:, 1] != 0):
+                            cont += 1
+                            gamma_matrix[1, p_n_cols + cont] = 1
+                            gamma_matrix[p_n_cols + cont, 1] = 1
+                        if p_n_cols >= 3:
+                            if bool(index_set[:, 2] != 0):
                                 cont += 1
-                                Gamma[3, n+cont] = 1
-                                Gamma[n+cont, 3] = 1
-                Beta[:n, :] = bk/byk
-                Beta[n, :] = d
-                delta = np.linalg.solve(Gamma, Beta)
-                ak = delta[:n]
-                ak = np.where(abs(ak) < 1e-9, 0, ak)
-        A[:, k] = np.c_[ak].T
-    return A, numerr
+                                gamma_matrix[2, p_n_cols + cont] = 1
+                                gamma_matrix[p_n_cols + cont, 2] = 1
+                            if p_n_cols == 4:
+                                if bool(index_set[:, 3] != 0):
+                                    cont += 1
+                                    gamma_matrix[3, p_n_cols + cont] = 1
+                                    gamma_matrix[p_n_cols + cont, 3] = 1
+                    beta_vector[:p_n_cols, :] = b_k / b_y_k
+                    beta_vector[p_n_cols, :] = d_lagrange
+                    delta = np.linalg.solve(gamma_matrix, beta_vector)
+                    a_k = delta[:p_n_cols]
+                    a_k = np.where(abs(a_k) < 1e-9, 0, a_k)
+            abundance_matrix[:, k_pos] = np.c_[a_k].T
+    except Exception as error:
+        log.error(f"ERROR [Abundance funtion | computation of abundances]: {error}")
+    return abundance_matrix, num_error
 
 
 @performance
-def endmember(Y, A, rho, normalization):
+def endmember(y_matrix: np.ndarray, a_matrix: np.ndarray, rho: int, normalization: int) -> np.ndarray:
     """
-    P = endmember(Y,A,rho,normalization)
+    p_matrix = endmember(Y,A,rho,normalization)
     Estimation of Optimal End-members in Linear Mixture Model
     Input Arguments:
     Y = Matrix of measurements
@@ -117,337 +204,272 @@ def endmember(Y, A, rho, normalization):
     rho = Weighting factor of regularization term
     normalization = normalization of estimated profiles (0=NO or 1=YES)
     Output Argument:
-    P = Matrix of end-members
+    p_matrix = Matrix of end-members
     Daniel U. Campos-Delgado
     September/2020
     """
-    n, N = A.shape
-    M, K = Y.shape
-    numerr = 0
-    R = sum(n-np.array(range(1, n)))
-    W = np.tile((1/K/sum(Y**2)), [n, 1]).T
-    if Y.shape[1] != N:
-        print("ERROR: the number of columns in Y and A does not match")
-        numerr = 1
-    o = (n * np.eye(n)-np.ones((n, n)))
-    n1 = (np.ones((n, 1)))
-    m1 = (np.ones((M, 1)))
-
-    # Construct Optimal Endmembers Matrix
-    T0 = (A @ (W*A.T)+rho*np.divide(o, R))
-    while 1/np.linalg.cond(T0, 1) < 1e-6:
-        rho = rho/10
-        T0 = (A @ (W*A.T)+rho*np.divide(o, R))
-        if rho < 1e-6:
-            print("Unstable numerical results in endmembers estimation, update rho!!")
-            numerr = 1
-    V = (np.eye(n) @ np.linalg.pinv(T0))
-    T2 = (Y @ (W*A.T) @ V)
-    if normalization == 1:
-        T1 = (np.eye(M)-(1/M)*(m1 @ m1.T))
-        T3 = ((1/M)*m1 @ n1.T)
-        P_est = T1 @ T2 + T3
-    else:
-        P_est = T2
-
-    # Evaluate and Project Negative Elements
-    P_est = np.where(P_est < 0, 0, P_est)
-    P_est = np.where(np.isnan(P_est), 0, P_est)
-    P_est = np.where(np.isinf(P_est), 0, P_est)
-
-    # Normalize Optimal Solution
-    if normalization == 1:
-        P_sum = np.sum(P_est, 0)
-        P = P_est/np.tile(P_sum, [M, 1])
-    else:
-        P = P_est
-    return P, numerr
+    try:
+        # Check arguments dimensions
+        a_rows, a_cols = a_matrix.shape
+        y_rows, y_cols = y_matrix.shape
+        num_error = 0
+        r = sum(a_rows - np.array(range(1, a_rows)))
+        w = np.tile((1 / y_cols / sum(y_matrix ** 2)), [a_rows, 1]).T
+        if y_matrix.shape[1] != a_cols:
+            log.error("The number of columns in <y_matrix> and <a_matrix> does not match")
+            num_error = 1
+        o_matrix = (a_rows * np.eye(a_rows) - np.ones((a_rows, a_rows)))
+        n1 = (np.ones((a_rows, 1)))
+        m1 = (np.ones((y_rows, 1)))
+    except Exception as error:
+        log.error(f"ERROR [Endmember function | arguments dimensions]: {error}")
+    try:
+        # Construct Optimal Endmembers Matrix
+        term_0 = (a_matrix @ (w * a_matrix.T) + rho * np.divide(o_matrix, r))
+        while 1 / np.linalg.cond(term_0, 1) < 1e-6:
+            rho = rho / 10
+            term_0 = (a_matrix @ (w * a_matrix.T) + rho * np.divide(o_matrix, r))
+            if rho < 1e-6:
+                log.error("Unstable numerical results in endmembers estimation, update rho!!")
+                num_error = 1
+        v = (np.eye(a_rows) @ np.linalg.pinv(term_0))
+        term_2 = (y_matrix @ (w * a_matrix.T) @ v)
+        if normalization == 1:
+            term_1 = (np.eye(y_rows) - (1 / y_rows) * (m1 @ m1.T))
+            term_3 = ((1 / y_rows) * m1 @ n1.T)
+            p_estimation = term_1 @ term_2 + term_3
+        else:
+            p_estimation = term_2
+    except Exception as error:
+        log.error(f"ERROR [Endmember function | optimal endmember matrix construction]: {error}")
+    try:
+        # Evaluate and Project Negative Elements
+        p_estimation = np.where(p_estimation < 0, 0, p_estimation)
+        p_estimation = np.where(np.isnan(p_estimation), 0, p_estimation)
+        p_estimation = np.where(np.isinf(p_estimation), 0, p_estimation)
+        # Normalize Optimal Solution
+        if normalization == 1:
+            p_sum = np.sum(p_estimation, 0)
+            p_matrix = p_estimation / np.tile(p_sum, [y_rows, 1])
+        else:
+            p_matrix = p_estimation
+    except Exception as error:
+        log.error(f"ERROR [Endmember function | negative elements evaluation and solution normalization]: {error}")
+    return p_matrix, num_error
 
 
 @performance
-def ebeae(Yo, n, parameters, Po, oae):
+def ebeae(**kwargs: [np.ndarray, int, dict, np.ndarray, int]):
     """
-    P, A, An, Yh, a_Time, p_Time = ebeae(Yo, n, parameters, Po, oae)
+    p_matrix, a_matrix, abundances_normalized, yh_matrix, a_Time, p_Time = ebeae(Yo, n, parameters, p_origin, oae)
     Estimation of Optimal Endmembers and Abundances in Linear Mixture Model
     Input Arguments:
-      Y = matrix of measurements (MxN)
-      n = order of linear mixture model
+      y_matrix = matrix of measurements (MxN)
+      n_order = order of linear mixture model
       parameters = 9x1 vector of hyperparameters in EBEAE methodology
-                 = [initicond, rho, Lambda, epsilon, maxiter, downsampling, parallel, normalization, display]
+                 = [initicond, rho, lambda_var, epsilon, maxiter, downsampling, parallel, normalization, display]
           initcond = initialization of endmembers matrix {1,2,3,4}
                                     (1) Maximum cosine difference from mean measurement (default)
                                     (2) Maximum and minimum energy, and largest distance from them
                                     (3) PCA selection + Rectified Linear Unit
                                     (4) ICA selection (FOBI) + Rectified Linear Unit
           rho = regularization weight in endmember estimation (default rho=0.1)
-          Lambda = entropy weight in abundance estimation in [0,1) (default Lambda=0)
+          lambda_var = entropy weight in abundance estimation in [0,1) (default lambda_var=0)
           epsilon = threshold for convergence in ALS method (default epsilon=1e-3)
           maxiter = maximum number of iterations in ALS method (default maxiter=20)
           downsampling = percentage of random downsampling in endmember estimation [0,1) (default downsampling=0.5)
           parallel = implement parallel computation of abundances (0->NO or 1->YES) (default parallel=0)
           normalization = normalization of estimated end-members (0->NO or 1->YES) (default normalization=1)
           display = show progress of iterative optimization process (0->NO or 1->YES) (default display=0)
-      Po = initial end-member matrix (Mxn)
-      oae = only optimal abundance estimation with Po (0 -> NO or 1 -> YES) (default oae = 0)
+      p_origin = initial end-member matrix (Mxn)
+      oae = only optimal abundance estimation with p_origin (0 -> NO or 1 -> YES) (default oae = 0)
     Output Arguments:
-      P  = matrix of endmembers (Mxn)
-      A  = scaled abundances matrix (nxN)
-      An = abundances matrix normalized (nxN)
-      Yh = estimated matrix of measurements (MxN)
+      p_matrix  = matrix of endmembers (Mxn)
+      a_matrix  = scaled abundances matrix (nxN)
+      abundances_normalized = abundances matrix normalized (nxN)
+      yh_matrix = estimated matrix of measurements (MxN)
       a_Time = estimated time in abundances estimation
       p_Time = estimated time in endmembers estimation
     Daniel U. Campos Delgado
     July/2020
     """
-    # Default parameters
-    initcond = 1
-    rho = 0.1
-    Lambda = 0
-    epsilon = 1e-3
-    maxiter = 20
-    downsampling = 0.5
-    parallel = 0
-    normalization = 1
-    display = 0
-    numerr = 0
-
     # Checking consistency of input arguments
-    nargin = 0
-    if type(Yo) == np.ndarray:
-        nargin += 1
-    if type(n) == int:
-        nargin += 1
-    if type(parameters) == list:
-        nargin += 1
-    if type(Po) == np.ndarray:
-        nargin += 1
-    if type(oae) == int:
-        nargin += 1
-
-    if nargin != 5:
-        oae = 0
-    if nargin == 0:
-        print("The measurement matrix Y has to be used as argument!!")
-    elif nargin == 1:
-        n = 2
-    elif nargin == 3 or nargin == 4 or nargin == 5:
-        if len(parameters) != 9:
-            print("The length of parameters vector is not 9 !!")
-            print("Default values of hyper-parameters are used instead")
+    try:
+        num_error = 0
+        num_input_args = len(kwargs)
+        if num_input_args == 0:
+            raise Exception("Measurement matrix y_matrix_scaled <y_matrix> has to be used as argument.")
+        args = args_consistency(kwargs)
+        if args['n_order'] < 2:
+            log.error("The order of the linear mixture model has to be greater than 2!")
+            log.info("The default value n=2 is considered!")
+            args['n_order'] = 2
+        if len(args['parameters']) != 9:
+            log.error("The length of parameters vector is not 9 !!")
+            log.info("Default values of hyper-parameters are used instead")
         else:
-            initcond, rho, Lambda, epsilon, maxiter, downsampling, parallel, normalization, display = parameters
-            if initcond != 1 and initcond != 2 and initcond != 3 and initcond != 4:
-                print("The initialization procedure of endmembers matrix is 1,2,3 or 4!")
-                print("The default value is considered!")
-                initcond = 1
-            if rho < 0:
-                print("The regularization weight rho cannot be negative")
-                print("The default value is considered!")
-                rho = 0.1
-            if Lambda < 0 or Lambda >= 1:
-                print("The entropy weight lambda is limited to [0,1)")
-                print("The default value is considered!")
-                Lambda = 0
-            if epsilon < 0 or epsilon > 0.5:
-                print("The threshold epsilon can't be negative or > 0.5")
-                print("The default value is considered!")
-                epsilon = 1e-3
-            if maxiter < 0 and maxiter < 100:
-                print("The upper bound maxiter can't be negative or >100")
-                print("The default value is considered!")
-                maxiter = 20
-            if 0 > downsampling > 1:
-                print("The downsampling factor cannot be negative or >1")
-                print("The default value is considered!")
-                downsampling = 0.5
-            if parallel != 0 and parallel != 1:
-                print("The parallelization parameter is 0 or 1")
-                print("The default value is considered!")
-                parallel = 0
-            if normalization != 0 and normalization != 1:
-                print("The normalization parameter is 0 or 1")
-                print("The default value is considered!")
-                normalization = 1
-            if display != 0 and display != 1:
-                print("The display parameter is 0 or 1")
-                print("The default value is considered")
-                display = 0
-        if n < 2:
-            print("The order of the linear mixture model has to be greater than 2!")
-            print("The default value n=2 is considered!")
-            n = 2
-    if nargin == 4 or nargin == 5:
-        if type(Po) != np.ndarray:
-            print("The initial end-members Po must be a matrix !!")
-            print("The initialization is considered by the maximum cosine difference from mean measurement")
-            initcond = 1
-        else:
-            if Po.shape[0] == Yo.shape[0] and Po.shape[1] == n:
-                initcond = 0
+            hyper_parameters = hyper_parameters_inspection(args['parameters'])
+        if num_input_args in [4, 5]:
+            if type(args['p_origin']) != np.ndarray:
+                log.error("The initial end-members p_origin must be a matrix !!")
+                log.info("The initialization is considered by the maximum cosine difference from mean measurement")
+                hyper_parameters['initcond'] = 1
             else:
-                print("The size of Po must be M x n!!")
-                print("The initialization is considered based on the input dataset")
-                initcond = 1
-    if nargin == 5:
-        if oae != 0 and oae != 1:
-            print("The assignment of oae is incorrect!!")
-            print("The initial end-members Po will be improved iteratively from a selected sample")
-            oae = 0
-        elif oae == 1 and initcond != 0:
-            print("The initial end-members Po is not defined properly!")
-            print("Po will be improved iteratively from a selected sample")
-            oae = 0
-    if nargin >= 6:
-        print("The number of input arguments is 5 maximum")
-        print("Please check the help documentation.")
-
-    # Random downsampling
-    if type(Yo) != np.ndarray:
-        print("The measurements matrix Y has to be a matrix")
-    M, No = Yo.shape
-    if M > No:
-        print("The number of spatial measurements has to be larger to the number of time samples!")
-    N = round(No*(1-downsampling))
-    Is = np.random.choice(No, N, replace=False)
-    Y = Yo[:, Is-1]
-
-    # Normalization
-    if normalization == 1:
-        mYm = np.sum(Y, 0)
-        mYmo = np.sum(Yo, 0)
-    else:
-        mYm = np.ones((1, N), dtype=int)
-        mYmo = np.ones((1, No), dtype=int)
-    Ym = Y / np.tile(mYm, [M, 1])
-    Ymo = Yo / np.tile(mYmo, [M, 1])
-    NYm = np.linalg.norm(Ym, 'fro')
-
-    # Selection of Initial Endmembers Matrix
-    if initcond == 1 or initcond == 2:
-        if initcond == 1:
-            Po = np.zeros((M, 1))
-            index = 1
-            p_max = np.mean(Yo, axis=1)
-            Yt = Yo
-            Po[:, index-1] = p_max
-        elif initcond == 2:
-            index = 1
-            Y1m = np.sum(abs(Yo), 0)
-            y_max = np.max(Y1m)
-            Imax = np.argwhere(Y1m == y_max)[0][0]
-            y_min = np.min(Y1m)
-            I_min = np.argwhere(Y1m == y_min)[0][0]
-            p_max = Yo[:, Imax]
-            p_min = Yo[:, I_min]
-            K = Yo.shape[1]
-            II = np.arange(1, K+1)
-            condition = np.logical_and(II != II[Imax], II != II[I_min])
-            II = np.extract(condition, II)
-            Yt = Yo[:, II-1]
-            Po = p_max
-            index += 1
-            Po = np.c_[Po, p_min]
-        while index < n:
-            y_max = np.zeros((1, index))
-            Imax = np.zeros((1, index), dtype=int)
-            for j in range(index):
-                if j == 0:
-                    for i in range(index):
-                        e1m = np.around(np.sum(Yt*np.tile(Po[:, i], [Yt.shape[1], 1]).T, 0) /
-                                        np.sqrt(np.sum(Yt**2, 0))/np.sqrt(np.sum(Po[:, i]**2, 0)), 4)
-                        y_max[j][i] = np.around(np.amin(abs(e1m)), 4)
-                        Imax[j][i] = np.where(e1m == y_max[j][i])[0][0]
-            ym_max = np.amin(y_max)
-            Im_max = np.where(y_max == ym_max)[1][0]
-            IImax = Imax[0][Im_max]
-            p_max = Yt[:, IImax]
-            index += 1
-            Po = np.c_[Po, p_max]
-            II = np.arange(1, Yt.shape[1]+1)
-            II = np.extract(II != IImax+1, II)
-            Yt = Yt[:, list(II-1)]
-    elif initcond == 3:
-        UU, s, VV = np.linalg.svd(Ym.T, full_matrices=False)
-        W = VV.T[:, :n]
-        Po = W * np.tile(np.sign(W.T@np.ones((M, 1))).T, [M, 1])
-    elif initcond == 4:
-        Yom = np.mean(Ym, axis=1)
-        Yon = Ym-np.tile(Yom, [N, 1]).T
-        UU, s, VV = np.linalg.svd(Yon.T, full_matrices=False)
-        S = np.diag(s)
-        Yo_w = np.linalg.pinv(linalg.sqrtm(S)) @ VV @ Ym
-        V, s, u = np.linalg.svd((np.tile(sum(Yo_w * Yo_w), [M, 1]) * Yo_w) @ Yo_w.T, full_matrices=False)
-        W = VV.T @ linalg.sqrtm(S)@V[:n, :].T
-        Po = W*np.tile(np.sign(W.T@np.ones((M, 1))).T, [M, 1])
-    Po = np.where(Po < 0, 0, Po)
-    Po = np.where(np.isnan(Po), 0, Po)
-    Po = np.where(np.isinf(Po), 0, Po)
-    if normalization == 1:
-        mPo = np.sum(Po, 0)
-        P = Po/np.tile(mPo, [M, 1])
-    else:
-        P = Po
-
-    # Alternated Least Squares Procedure
-    ITER = 1
-    J = 1e5
-    Jp = 1e6
-    a_Time = 0
-    p_Time = 0
-    tic = time.time()
-    if display == 1:
-        print("#################################")
-        print("EBEAE Linear Unmixing")
-        print(f"Model Order = {n}")
-        if oae == 1:
-            print("Only the abundances are estimated from Po")
-        elif oae == 0 and initcond == 0:
-            print("The end-members matrix is initialized externally by matrix Po")
-        elif oae == 0 and initcond == 1:
-            print("Po is constructed based on the maximum cosine difference from mean measurement")
-        elif oae == 0 and initcond == 2:
-            print("Po is constructed based on the maximum and minimum energy, and largest difference from them")
-        elif oae == 0 and initcond == 3:
-            print("Po is constructed based on the PCA selection + Rectified Linear Unit")
-        elif oae == 0 and initcond == 4:
-            print("Po is constructed based on the ICA selection (FOBI) + Rectified Linear Unit")
-
-    while (Jp-J)/Jp >= epsilon and ITER < maxiter and oae == 0 and numerr == 0:
-        t_A, outputs_a = abundance(Ym, P, Lambda, parallel)
-        Am, numerr = outputs_a
-        a_Time += t_A
-        Pp = P
-        if numerr == 0:
-            t_P, outputs_e = endmember(Ym, Am, rho, normalization)
-            P, numerr = outputs_e
-            p_Time += t_P
-        Jp = J
-        J = np.linalg.norm(Ym-P@Am, 'fro')
-        if J > Jp:
-            P = Pp
-            break
-        if display == 1:
-            print(f"Number of iteration = {ITER}")
-            print(f"Percentage Estimation Error = {(100*J)/NYm} %")
-            print(f"Abundance estimation took {t_A}")
-            print(f"Endmember estimation took {t_P}")
-        ITER += 1
-
-    if numerr == 0:
-        t_A, outputs_a = abundance(Ymo, P, Lambda, parallel)
-        Am, numerr = outputs_a
-        a_Time += t_A
-        toc = time.time()
-        elap_time = toc-tic
-        if display == 1:
-            print(f"Elapsed Time = {elap_time} seconds")
-        An = Am
-        A = Am * np.tile(mYmo, [n, 1])
-        Yh = P @ A
-    else:
-        print("Please review the problem formulation, not reliable results")
-        P = np.array([])
-        A = np.array([])
-        An = np.array([])
-        Yh = np.array([])
-    return P, A, An, Yh, a_Time, p_Time
+                if args['p_origin'].shape == (args['y_matrix'].shape[0], args['n_order']):
+                    hyper_parameters['initcond'] = 0
+                else:
+                    log.error("The size of p_origin must be num_measurements x n!!")
+                    log.info("The initialization is considered based on the input dataset")
+                    hyper_parameters['initcond'] = 1
+            if args['oae'] not in [0, 1]:
+                log.error("The assignment of oae is incorrect!!")
+                log.info("The initial end-members p_origin will be improved iteratively from a selected sample")
+                args['oae'] = 0
+            elif args['oae'] == 1 and hyper_parameters['initcond'] != 0:
+                log.error("The initial end-members p_origin is not defined properly!")
+                log.info("p_origin will be improved iteratively from a selected sample")
+                args['oae'] = 0
+        if num_input_args >= 6:
+            log.error("The number of input arguments is 5 maximum")
+            raise Exception("Please check the docstrings.")
+    except Exception as error:
+        log.error(f"ERROR [Consistency of input arguments step]: {error}")
+    try:
+        # Random downsampling
+        if type(args['y_matrix']) != np.ndarray:
+            log.error("The measurements matrix y_matrix_scaled has to be a matrix")
+        num_measurements, num_time_samples = args['y_matrix'].shape
+        if num_measurements > num_time_samples:
+            raise Exception("The number of spatial measurements has to be larger to the number of time samples!")
+        num_ts_downsampled = round(num_time_samples * (1 - hyper_parameters['downsampling']))
+        samples_index = np.random.choice(num_time_samples, num_ts_downsampled, replace=False)
+        y_matrix_scaled = args['y_matrix'][:, samples_index - 1]
+    except Exception as error:
+        log.error(f"ERROR [Random downsampling step]: {error}")
+    try:
+        # Normalization
+        if hyper_parameters['normalization'] == 1:
+            m_ym = np.sum(y_matrix_scaled, 0)
+            m_ymo = np.sum(args['y_matrix'], 0)
+        else:
+            m_ym = np.ones((1, num_ts_downsampled), dtype=int)
+            m_ymo = np.ones((1, num_time_samples), dtype=int)
+        ym = y_matrix_scaled / np.tile(m_ym, [num_measurements, 1])
+        ym_origin = args['y_matrix'] / np.tile(m_ymo, [num_measurements, 1])
+        norm_ym = np.linalg.norm(ym, 'fro')
+    except Exception as error:
+        log.error(f"ERROR [Normalization step]: {error}")
+    try:
+        # Selection of Initial Endmembers Matrix
+        if hyper_parameters['initcond'] in [1, 2]:
+            if hyper_parameters['initcond'] == 1:
+                index = 1
+                p_origin = np.zeros((num_measurements, 1))
+                p_max = np.mean(args['y_matrix'], axis=1)
+                y_copy = args['y_matrix']
+                p_origin[:, index - 1] = p_max
+            elif hyper_parameters['initcond'] == 2:
+                index = 1
+                y1m = np.sum(abs(args['y_matrix']), 0)
+                y_max, y_min = np.max(y1m), np.min(y1m)
+                index_max, index_min = np.argwhere(y1m == y_max)[0][0], np.argwhere(y1m == y_min)[0][0]
+                p_max, p_min = args['y_matrix'][:, index_max], args['y_matrix'][:, index_min]
+                k_positions = args['y_matrix'].shape[1]
+                i_i = np.arange(1, k_positions + 1)
+                condition = np.logical_and(i_i != i_i[index_max], i_i != i_i[index_min])
+                i_i = np.extract(condition, i_i)
+                y_copy = args['y_matrix'][:, i_i - 1]
+                p_origin = p_max
+                index += 1
+                p_origin = np.c_[p_origin, p_min]
+            while index < args['n_order']:
+                y_max = np.zeros((1, index))
+                index_max = np.zeros((1, index), dtype=int)
+                for j in range(index):
+                    if j == 0:
+                        for i in range(index):
+                            e1m = np.around(np.sum(y_copy * np.tile(p_origin[:, i], [y_copy.shape[1], 1]).T, 0) /
+                                            np.sqrt(np.sum(y_copy ** 2, 0)) / np.sqrt(np.sum(p_origin[:, i] ** 2, 0)),
+                                            4)
+                            y_max[j][i] = np.around(np.amin(abs(e1m)), 4)
+                            index_max[j][i] = np.where(e1m == y_max[j][i])[0][0]
+                ym_max = np.amin(y_max)
+                im_max = np.where(y_max == ym_max)[1][0]
+                i_imax = index_max[0][im_max]
+                p_max = y_copy[:, i_imax]
+                index += 1
+                p_origin = np.c_[p_origin, p_max]
+                i_i = np.arange(1, y_copy.shape[1] + 1)
+                i_i = np.extract(i_i != i_imax + 1, i_i)
+                y_copy = y_copy[:, list(i_i - 1)]
+        elif hyper_parameters['initcond'] == 3:
+            uu, s, vv = np.linalg.svd(ym.T, full_matrices=False)
+            w = vv.T[:, :args['n_order']]
+            p_origin = w * np.tile(np.sign(w.T @ np.ones((num_measurements, 1))).T, [num_measurements, 1])
+        elif hyper_parameters['initcond'] == 4:
+            yo_mean = np.mean(ym, axis=1)
+            yo_norm = ym - np.tile(yo_mean, [num_ts_downsampled, 1]).T
+            uu, s, vv = np.linalg.svd(yo_norm.T, full_matrices=False)
+            s_diagonal = np.diag(s)
+            yo_w = np.linalg.pinv(linalg.sqrtm(s_diagonal)) @ vv @ ym
+            v, s, u = np.linalg.svd((np.tile(sum(yo_w * yo_w), [num_measurements, 1]) * yo_w) @ yo_w.T,
+                                    full_matrices=False)
+            w = vv.T @ linalg.sqrtm(s_diagonal) @ v[:args['n_order'], :].T
+            p_origin = w * np.tile(np.sign(w.T @ np.ones((num_measurements, 1))).T, [num_measurements, 1])
+        p_origin = np.where(p_origin < 0, 0, p_origin)
+        p_origin = np.where(np.isnan(p_origin), 0, p_origin)
+        p_origin = np.where(np.isinf(p_origin), 0, p_origin)
+        if hyper_parameters['normalization'] == 1:
+            m_po = np.sum(p_origin, 0)
+            p_matrix = p_origin / np.tile(m_po, [num_measurements, 1])
+        else:
+            p_matrix = p_origin
+    except Exception as error:
+        log.error(f"ERROR [Selection of initial endmembers matrix step]: {error}")
+    try:
+        # Alternated Least Squares Procedure
+        iteration, j, jp, a_time, p_time = [1, 1e5, 1e6, 0, 0]
+        tic = time.time()
+        if hyper_parameters['display'] == 1:
+            display_details(args['n_order'], args['oae'], hyper_parameters['initcond'])
+        while (jp - j) / jp >= hyper_parameters['epsilon'] and iteration < hyper_parameters['maxiter'] and \
+                        args['oae'] == 0 and num_error == 0:
+            time_a, outputs_a = abundance(ym, p_matrix, hyper_parameters['lambda_var'], hyper_parameters['parallel'])
+            a_matrix, num_error = outputs_a
+            a_time += time_a
+            init_p_matrix = p_matrix
+            if num_error == 0:
+                time_e, outputs_e = endmember(ym, a_matrix, hyper_parameters['rho'], hyper_parameters['normalization'])
+                p_matrix, num_error = outputs_e
+                p_time += time_e
+            jp = j
+            j = np.linalg.norm(ym - p_matrix @ a_matrix, 'fro')
+            if j > jp:
+                p_matrix = init_p_matrix
+                break
+            if hyper_parameters['display'] == 1:
+                log.info(f"Number of iteration = {iteration}")
+                log.info(f"Percentage Estimation Error = {(100 * j) / norm_ym} %")
+                log.info(f"Abundance estimation took {time_a}")
+                log.info(f"Endmember estimation took {time_e}")
+            iteration += 1
+        if num_error == 0:
+            time_a, outputs_a = abundance(ym_origin, p_matrix, hyper_parameters['lambda_var'], hyper_parameters['parallel'])
+            a_matrix, num_error = outputs_a
+            a_time += time_a
+            toc = time.time()
+            elap_time = toc - tic
+            if hyper_parameters['display'] == 1:
+                log.info(f"Elapsed Time = {elap_time} seconds")
+            abundances_normalized = a_matrix
+            a_scaled = a_matrix * np.tile(m_ymo, [args['n_order'], 1])
+            yh_matrix = p_matrix @ a_scaled
+        else:
+            log.error("Please review the problem formulation, not reliable results")
+            p_matrix = np.array([])
+            a_scaled = np.array([])
+            abundances_normalized = np.array([])
+            yh_matrix = np.array([])
+    except Exception as error:
+        log.error(f"ERROR [Alternated Least Squares step]: {error}")
+    return p_matrix, a_scaled, abundances_normalized, yh_matrix, a_time, p_time

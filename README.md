@@ -1,13 +1,12 @@
-# EBEAE_Algorithm
+# EBEAE  Algorithm
 ## Extended Blind Endmember and Abundance Extraction (EBEAE) Algorithm for multi/hyperspectral imaging analysis.
 
-This repository contains the necessary scripts and files for synthetic evaluation of EBEAE with multispectral 
+This repository contains the necessary files for synthetic evaluation of EBEAE with multispectral 
 Fluorescence Lifetime Imaging Microscopy (mFLIM) and Visible-Near Infrared (VNIR) datasets.
 
 E X E C U T I O N:
 - By terminal (default input arguments):
-    - python3 test_EBEAE_mFLIM.py
-    - python3 test_EBEAE_VNIR.py
+    - python3 EBEAE2.0.py
 
 - By IDE:
     - Allows edition of the input arguments to work with EBEAE algorithm.
