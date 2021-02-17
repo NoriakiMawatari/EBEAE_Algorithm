@@ -6,7 +6,7 @@ Fluorescence Lifetime Imaging Microscopy (mFLIM) and Visible-Near Infrared (VNIR
 
 E X E C U T I O N:
 - By terminal (default input arguments):
-    - python3 EBEAE2.0.py
+    - python3 EBEAE_2.0.py
 
 - By IDE:
     - Allows edition of the input arguments to work with EBEAE algorithm.
