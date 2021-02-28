@@ -19,10 +19,12 @@ def abundance_maps(dataset: str, input_args: dict) -> str:
             plt.figure(1, figsize=(7, 5))
             for i in range(1, input_args['n_order'] + 1):
                 eval(f"plt.subplot(2{input_args['n_order']}{i})")
-                eval(f"plt.imshow(a_origin[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0],aspect='auto')")
+                eval(
+                    f"plt.imshow(a_origin[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0],aspect='auto')")
                 plt.title(f"Endmember #{i}", fontweight="bold", fontsize=10)
                 eval(f"plt.subplot(2{input_args['n_order']}{i + input_args['n_order']})")
-                eval(f"plt.imshow(a_normalized[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0], aspect='auto')")
+                eval(
+                    f"plt.imshow(a_normalized[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0], aspect='auto')")
                 if i == 2:
                     plt.title("EBEAE Estimation", fontweight="bold", fontsize=10)
             plt.yticks(np.arange(0, 101, 20))
@@ -34,10 +36,12 @@ def abundance_maps(dataset: str, input_args: dict) -> str:
             plt.figure(1, figsize=(7, 5))
             for i in range(1, input_args['n_order'] + 1):
                 eval(f"plt.subplot(2{input_args['n_order']}{i})")
-                eval(f"plt.imshow(a_origin[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0],aspect='auto')")
+                eval(
+                    f"plt.imshow(a_origin[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0],aspect='auto')")
                 plt.title(f"Endmember #{i}", fontweight="bold", fontsize=10)
                 eval(f"plt.subplot(2{input_args['n_order']}{i + input_args['n_order']})")
-                eval(f"plt.imshow(a_normalized[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0], aspect='auto')")
+                eval(
+                    f"plt.imshow(a_normalized[{i - 1},:].reshape((input_args['n_samples'],input_args['n_samples'])).T,extent = [0,100,100,0], aspect='auto')")
                 if i == 2:
                     plt.title("EBEAE Estimation", fontweight="bold", fontsize=10)
             plt.xticks(np.arange(0, 101, 20))
@@ -123,11 +127,12 @@ if __name__ == '__main__':
         # Logs configuration
         log.basicConfig(level=log.INFO, format='%(asctime)s :: %(levelname)s :: %(message)s')
         # Create synthetic mFLIM database
-        choice = input("Running EBEAE algorithm test\nAvailable datasets:\n1)mFLIM\n2)VNIR\nPlease select synthetic "
-                    "dataset to start: ")
+        choice = input("Running EBEAE algorithm test\nAvailable datasets:\n1)mFLIM\n2)VNIR\nPlease select synthetic"
+                       "dataset to start:")
         if choice == '1':
             dataset = 'mFLIM'
-            y_matrix_origin, p_origin, a_origin, input_args = mflimsynth(n_order=4, n_samples=100, ts=250e-12, snr=45, psnr=15)
+            y_matrix_origin, p_origin, a_origin, input_args = mflimsynth(n_order=4, n_samples=100, ts=250e-12, snr=45,
+                                                                         psnr=15)
             y_measurements, k_spatial_pos = y_matrix_origin.shape
             mflim_parameters = {
                 'initcond': 3,
@@ -162,15 +167,18 @@ if __name__ == '__main__':
         log.error(f"ERROR [Synthetic database]: {error}")
     try:
         # Execute EBEAE Methodology
-        log.info(f"Synthetic {dataset} Dataset")
-        log.info(f"SNR = {input_args['snr']} dB")
-        log.info(f"PSNR = {input_args['psnr']} dB")
-        log.info(f"Number of endmembers = {input_args['n_order']}")
-        log.info("EBEAE Analysis")
+        log.info(f"""
+        Synthetic {dataset} Dataset
+        SNR = {input_args['snr']} dB
+        PSNR = {input_args['psnr']} dB
+        Number of endmembers = {input_args['n_order']}
+        EBEAE Analysis""")
         if dataset == 'mFLIM':
-            t_ebeae, results = ebeae(y_matrix=y_matrix_origin, n_order=input_args['n_order'], parameters=mflim_parameters)
+            t_ebeae, results = ebeae(y_matrix=y_matrix_origin, n_order=input_args['n_order'],
+                                     parameters=mflim_parameters)
         elif dataset == 'VNIR':
-            t_ebeae, results = ebeae(y_matrix=y_matrix_origin, n_order=input_args['n_order'], parameters=vnir_parameters)
+            t_ebeae, results = ebeae(y_matrix=y_matrix_origin, n_order=input_args['n_order'],
+                                     parameters=vnir_parameters)
         else:
             raise Exception("Unknown dataset!!!")
         p_matrix, a_scaled, a_normalized, yh_matrix, a_time, p_time = results
@@ -184,13 +192,14 @@ if __name__ == '__main__':
             for j in range(input_args['n_order']):
                 ebeae_endmembers = np.append(ebeae_endmembers, np.linalg.norm(p_origin[:, i] - p_matrix[:, j]))
                 ebeae_abundances = np.append(ebeae_abundances, np.linalg.norm(a_origin[i, :] - a_normalized[j, :]))
-        log.info("Performance Metrics")
-        log.info(f"Execution time = {t_ebeae} s")
-        log.info(f"Estimation Error in Measurements = {np.linalg.norm(y_matrix_origin-yh_matrix, 'fro')/k_spatial_pos}")
-        log.info(f"Estimation Error in Endmembers = {np.min(ebeae_endmembers) / (2 * input_args['n_order'])}")
-        log.info(f"Estimation Error in Abundances = {np.min(ebeae_abundances) / (2 * input_args['n_order'])}")
-        log.info(f"Execution time for Abundances in ALS procedure = {a_time}")
-        log.info(f"Execution time for Endmembers in ALS procedure = {p_time}")
+        log.info(f"""
+        Performance Metrics
+        Execution time = {t_ebeae} s
+        Estimation Error in Measurements = {np.linalg.norm(y_matrix_origin - yh_matrix, 'fro') / k_spatial_pos}
+        Estimation Error in Endmembers = {np.min(ebeae_endmembers) / (2 * input_args['n_order'])}
+        Estimation Error in Abundances = {np.min(ebeae_abundances) / (2 * input_args['n_order'])}
+        Execution time for Abundances in ALS procedure = {a_time}
+        Execution time for Endmembers in ALS procedure = {p_time}""")
     except Exception as error:
         log.error(f"ERROR [Errors estimation]: {error}")
     try:

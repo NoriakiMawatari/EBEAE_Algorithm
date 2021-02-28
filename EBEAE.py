@@ -42,40 +42,49 @@ def args_consistency(kwargs: dict) -> dict:
 
 def hyper_parameters_inspection(parameters: dict) -> dict:
     if parameters['initcond'] not in [1, 2, 3, 4]:
-        print("The initialization procedure of endmembers matrix is 1,2,3 or 4!")
-        print("The default value is considered!")
+        log.info("""
+        The initialization procedure of endmembers matrix is 1,2,3 or 4!
+        The default value is considered!""")
         parameters['initcond'] = 1
     if parameters['rho'] < 0:
-        print("The regularization weight rho cannot be negative")
-        print("The default value is considered!")
+        log.info("""
+        The regularization weight rho cannot be negative
+        The default value is considered!""")
         parameters['rho'] = 0.1
     if parameters['lambda_var'] < 0 or parameters['lambda_var'] >= 1:
-        print("The entropy weight lambda is limited to [0,1)")
-        print("The default value is considered!")
+        log.info("""
+        The entropy weight lambda is limited to [0,1)
+        The default value is considered!""")
         parameters['lambda_var'] = 0
     if parameters['epsilon'] < 0 or parameters['epsilon'] > 0.5:
-        print("The threshold epsilon can't be negative or > 0.5")
-        print("The default value is considered!")
+        log.info("""
+        The threshold epsilon can't be negative or > 0.5
+        The default value is considered!""")
         parameters['epsilon'] = 1e-3
     if parameters['maxiter'] < 0 or parameters['maxiter'] > 100:
-        print("The upper bound maxiter can't be negative or > 100")
-        print("The default value is considered!")
+        log.info("""
+        The upper bound maxiter can't be negative or > 100
+        The default value is considered!""")
         parameters['maxiter'] = 20
     if parameters['downsampling'] < 0 or parameters['downsampling'] > 1:
-        print("The downsampling factor cannot be negative or > 1")
-        print("The default value is considered!")
+        log.info("""
+        The downsampling factor cannot be negative or > 1
+        The default value is considered!""")
         parameters['downsampling'] = 0.5
     if parameters['parallel'] not in [0, 1]:
-        print("The parallelization parameter is 0 or 1")
-        print("The default value is considered!")
+        log.info("""
+        The parallelization parameter is 0 or 1
+        The default value is considered!""")
         parameters['parallel'] = 0
     if parameters['normalization'] not in [0, 1]:
-        print("The normalization parameter is 0 or 1")
-        print("The default value is considered!")
+        log.info("""
+        The normalization parameter is 0 or 1
+        The default value is considered!""")
         parameters['normalization'] = 1
     if parameters['display'] not in [0, 1]:
-        print("The display parameter is 0 or 1")
-        print("The default value is considered")
+        log.info("""
+        The display parameter is 0 or 1
+        The default value is considered""")
         parameters['display'] = 0
     return parameters
 
@@ -102,13 +111,13 @@ def display_details(n_order: int, oae: int, initcond: int) -> None:
 def abundance(y_matrix: np.ndarray, p_matrix: np.ndarray, lambda_var: float, parallel: int) -> np.ndarray:
     """
     Estimation of Optimal Abundances in Linear Mixture Model
-    INPUTS:
-    y_matrix = matrix of measurements
-    p_matrix = matrix of end-members
-    lambda_var =  entropy weight in abundance estimation in (0,1)
-    parallel = implementation in parallel of the estimation
-    OUTPUTS:
-    abundance_matrix = abundances matrix
+    Inputs:
+        y_matrix = matrix of measurements
+        p_matrix = matrix of end-members
+        lambda_var =  entropy weight in abundance estimation in (0,1)
+        parallel = implementation in parallel of the estimation
+    Outputs:
+        abundance_matrix = abundances matrix
     - Daniel U. Campos-Delgado (September/2020)
     """
     try:
@@ -196,17 +205,15 @@ def abundance(y_matrix: np.ndarray, p_matrix: np.ndarray, lambda_var: float, par
 @performance
 def endmember(y_matrix: np.ndarray, a_matrix: np.ndarray, rho: int, normalization: int) -> np.ndarray:
     """
-    p_matrix = endmember(Y,A,rho,normalization)
     Estimation of Optimal End-members in Linear Mixture Model
     Input Arguments:
-    Y = Matrix of measurements
-    A =  Matrix of abundances
-    rho = Weighting factor of regularization term
-    normalization = normalization of estimated profiles (0=NO or 1=YES)
+        y_matrix = Matrix of measurements
+        a_matrix =  Matrix of abundances
+        rho = Weighting factor of regularization term
+        normalization = normalization of estimated profiles (0=NO or 1=YES)
     Output Argument:
-    p_matrix = Matrix of end-members
-    Daniel U. Campos-Delgado
-    September/2020
+        p_matrix = Matrix of end-members
+    - Daniel U. Campos-Delgado (September/2020)
     """
     try:
         # Check arguments dimensions
@@ -259,39 +266,38 @@ def endmember(y_matrix: np.ndarray, a_matrix: np.ndarray, rho: int, normalizatio
 
 
 @performance
-def ebeae(**kwargs: [np.ndarray, int, dict, np.ndarray, int]):
+def ebeae(**kwargs: [np.ndarray, int, dict, np.ndarray, int]) -> \
+        [np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     """
-    p_matrix, a_matrix, abundances_normalized, yh_matrix, a_Time, p_Time = ebeae(Yo, n, parameters, p_origin, oae)
     Estimation of Optimal Endmembers and Abundances in Linear Mixture Model
     Input Arguments:
-      y_matrix = matrix of measurements (MxN)
-      n_order = order of linear mixture model
-      parameters = 9x1 vector of hyperparameters in EBEAE methodology
-                 = [initicond, rho, lambda_var, epsilon, maxiter, downsampling, parallel, normalization, display]
-          initcond = initialization of endmembers matrix {1,2,3,4}
+        y_matrix = matrix of measurements (MxN)
+        n_order = order of linear mixture model
+        parameters = 9x1 vector of hyperparameters in EBEAE methodology
+                    = [initicond, rho, lambda_var, epsilon, maxiter, downsampling, parallel, normalization, display]
+            initcond = initialization of endmembers matrix {1,2,3,4}
                                     (1) Maximum cosine difference from mean measurement (default)
                                     (2) Maximum and minimum energy, and largest distance from them
                                     (3) PCA selection + Rectified Linear Unit
                                     (4) ICA selection (FOBI) + Rectified Linear Unit
-          rho = regularization weight in endmember estimation (default rho=0.1)
-          lambda_var = entropy weight in abundance estimation in [0,1) (default lambda_var=0)
-          epsilon = threshold for convergence in ALS method (default epsilon=1e-3)
-          maxiter = maximum number of iterations in ALS method (default maxiter=20)
-          downsampling = percentage of random downsampling in endmember estimation [0,1) (default downsampling=0.5)
-          parallel = implement parallel computation of abundances (0->NO or 1->YES) (default parallel=0)
-          normalization = normalization of estimated end-members (0->NO or 1->YES) (default normalization=1)
-          display = show progress of iterative optimization process (0->NO or 1->YES) (default display=0)
-      p_origin = initial end-member matrix (Mxn)
-      oae = only optimal abundance estimation with p_origin (0 -> NO or 1 -> YES) (default oae = 0)
+            rho = regularization weight in endmember estimation (default rho=0.1)
+            lambda_var = entropy weight in abundance estimation in [0,1) (default lambda_var=0)
+            epsilon = threshold for convergence in ALS method (default epsilon=1e-3)
+            maxiter = maximum number of iterations in ALS method (default maxiter=20)
+            downsampling = percentage of random downsampling in endmember estimation [0,1) (default downsampling=0.5)
+            parallel = implement parallel computation of abundances (0->NO or 1->YES) (default parallel=0)
+            normalization = normalization of estimated end-members (0->NO or 1->YES) (default normalization=1)
+            display = show progress of iterative optimization process (0->NO or 1->YES) (default display=0)
+        p_origin = initial end-member matrix (Mxn)
+        oae = only optimal abundance estimation with p_origin (0 -> NO or 1 -> YES) (default oae = 0)
     Output Arguments:
-      p_matrix  = matrix of endmembers (Mxn)
-      a_matrix  = scaled abundances matrix (nxN)
-      abundances_normalized = abundances matrix normalized (nxN)
-      yh_matrix = estimated matrix of measurements (MxN)
-      a_Time = estimated time in abundances estimation
-      p_Time = estimated time in endmembers estimation
-    Daniel U. Campos Delgado
-    July/2020
+        p_matrix  = matrix of endmembers (Mxn)
+        a_matrix  = scaled abundances matrix (nxN)
+        abundances_normalized = abundances matrix normalized (nxN)
+        yh_matrix = estimated matrix of measurements (MxN)
+        a_Time = estimated time in abundances estimation
+        p_Time = estimated time in endmembers estimation
+    - Daniel U. Campos Delgado (July/2020)
     """
     # Checking consistency of input arguments
     try:
